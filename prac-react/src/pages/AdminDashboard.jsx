@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -10,9 +10,11 @@ import {
     Leaf, TrendingUp, CheckCircle, XCircle, Clock, Users,
     AlertTriangle, Save, ChevronRight, ExternalLink, Search,
     Mail, Phone, GraduationCap, Calendar, MapPin, Eye,
+    Send,
 } from 'lucide-react';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
+import { sendStatusEmail } from '../emailService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -223,10 +225,72 @@ function CoursesTab({ courses, loading, onEdit, onDelete }) {
 
 // ─── Applications Tab ─────────────────────────────────────────────────────────
 
+// ─── Toast Notification ───────────────────────────────────────────────────────
+
+function Toast({ message, type, onDismiss }) {
+    useEffect(() => {
+        const t = setTimeout(onDismiss, 4000);
+        return () => clearTimeout(t);
+    }, [onDismiss]);
+
+    const colors = {
+        success: 'bg-emerald-600',
+        error: 'bg-rose-600',
+        info: 'bg-blue-600',
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 24, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.95 }}
+            className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 rounded-2xl px-5 py-3.5 text-sm font-medium text-white shadow-2xl ${colors[type] || colors.info}`}
+        >
+            {type === 'success' && <CheckCircle className="h-4 w-4 shrink-0" />}
+            {type === 'error' && <XCircle className="h-4 w-4 shrink-0" />}
+            {type === 'info' && <Send className="h-4 w-4 shrink-0" />}
+            {message}
+            <button onClick={onDismiss} className="ml-1 opacity-70 hover:opacity-100">
+                <X className="h-3.5 w-3.5" />
+            </button>
+        </motion.div>
+    );
+}
+
 function ApplicationsTab({ applications, onUpdateStatus }) {
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [expanded, setExpanded] = useState(null);
+    const [sendingEmail, setSendingEmail] = useState(null); // appId being emailed
+    const [toast, setToast] = useState(null); // { message, type }
+
+    const showToast = useCallback((message, type = 'success') => {
+        setToast({ message, type });
+    }, []);
+
+    async function handleStatusChange(app, newStatus) {
+        await onUpdateStatus(app.id, newStatus);
+
+        // Send email only for approved or rejected
+        if (newStatus === 'approved' || newStatus === 'rejected') {
+            setSendingEmail(app.id);
+            try {
+                await sendStatusEmail(app, newStatus);
+                showToast(
+                    `Email sent to ${app.email} — application ${newStatus}!`,
+                    'success'
+                );
+            } catch (err) {
+                console.error('EmailJS send failed:', err);
+                showToast(
+                    `Status updated, but email failed to send. Check EmailJS config.`,
+                    'error'
+                );
+            } finally {
+                setSendingEmail(null);
+            }
+        }
+    }
 
     const filtered = applications.filter((app) => {
         const matchSearch =
@@ -267,8 +331,8 @@ function ApplicationsTab({ applications, onUpdateStatus }) {
                             key={s}
                             onClick={() => setFilterStatus(s)}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize transition ${filterStatus === s
-                                    ? 'border-emerald-600 bg-emerald-600 text-white'
-                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                                ? 'border-emerald-600 bg-emerald-600 text-white'
+                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                                 }`}
                         >
                             {s}
@@ -344,23 +408,35 @@ function ApplicationsTab({ applications, onUpdateStatus }) {
                                                 </div>
 
                                                 {/* Status change buttons */}
-                                                <div className="mt-5 flex flex-wrap gap-2">
+                                                <div className="mt-5 flex flex-wrap gap-2 items-center">
                                                     <p className="mr-2 self-center text-xs font-semibold text-slate-500 uppercase tracking-wide">Change Status:</p>
                                                     {['pending', 'approved', 'rejected'].map((s) => (
                                                         <button
                                                             key={s}
-                                                            onClick={() => onUpdateStatus(app.id, s)}
-                                                            disabled={app.status === s}
-                                                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition disabled:opacity-40 ${s === 'approved'
-                                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                                                                    : s === 'rejected'
-                                                                        ? 'bg-rose-600 text-white hover:bg-rose-500'
-                                                                        : 'bg-amber-500 text-white hover:bg-amber-400'
+                                                            onClick={() => handleStatusChange(app, s)}
+                                                            disabled={app.status === s || sendingEmail === app.id}
+                                                            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition disabled:opacity-40 ${s === 'approved'
+                                                                ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                                                                : s === 'rejected'
+                                                                    ? 'bg-rose-600 text-white hover:bg-rose-500'
+                                                                    : 'bg-amber-500 text-white hover:bg-amber-400'
                                                                 }`}
                                                         >
+                                                            {sendingEmail === app.id && app.status !== s ? (
+                                                                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                                                                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="32" strokeDashoffset="12" />
+                                                                </svg>
+                                                            ) : (
+                                                                (s === 'approved' || s === 'rejected') && <Mail className="h-3 w-3" />
+                                                            )}
                                                             {s}
                                                         </button>
                                                     ))}
+                                                    {(app.status === 'approved' || app.status === 'rejected') && (
+                                                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                                                            <Mail className="h-3 w-3" /> Email sent on status change
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </motion.div>
@@ -371,6 +447,15 @@ function ApplicationsTab({ applications, onUpdateStatus }) {
                     })}
                 </div>
             )}
+            <AnimatePresence>
+                {toast && (
+                    <Toast
+                        message={toast.message}
+                        type={toast.type}
+                        onDismiss={() => setToast(null)}
+                    />
+                )}
+            </AnimatePresence>
         </div>
     );
 }
@@ -661,8 +746,8 @@ function NavItem({ id, label, icon: Icon, badge, active, onClick }) {
         <motion.button
             onClick={() => onClick(id)}
             className={`flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${active
-                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
-                    : 'text-white/60 hover:bg-white/10 hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                : 'text-white/60 hover:bg-white/10 hover:text-white'
                 }`}
             whileHover={{ x: active ? 0 : 3 }}
             whileTap={{ scale: 0.97 }}

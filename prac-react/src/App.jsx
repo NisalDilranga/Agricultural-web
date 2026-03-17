@@ -1,6 +1,7 @@
 import './App.css';
 import { Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Home from './pages/Home';
@@ -22,6 +23,7 @@ const PublicLayout = ({ children }) => (
 function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <Routes>
         {/* ── Public pages ── */}
         <Route path="/" element={<PublicLayout><Home /></PublicLayout>} />
@@ -39,6 +41,7 @@ function App() {
           }
         />
       </Routes>
+      </ToastProvider>
     </AuthProvider>
   );
 }

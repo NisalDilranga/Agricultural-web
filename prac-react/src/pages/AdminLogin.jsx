@@ -3,6 +3,7 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, LogIn, Leaf, AlertCircle, KeyRound, ArrowLeft, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 function Spinner() {
     return (
@@ -19,6 +20,7 @@ function Spinner() {
 function AdminLogin() {
     const navigate = useNavigate();
     const { login, user, resetPassword } = useAuth();
+    const toast = useToast();
 
     // ── Login state ──
     const [email, setEmail] = useState('');
@@ -43,9 +45,11 @@ function AdminLogin() {
         setLoading(true);
         try {
             await login(email, password);
+            toast.success('Welcome back! Redirecting to dashboard…');
             navigate('/admin');
         } catch {
             setError('Invalid email or password. Please try again.');
+            toast.error('Login failed. Check your credentials.');
         } finally {
             setLoading(false);
         }
@@ -62,11 +66,14 @@ function AdminLogin() {
         try {
             await resetPassword(resetEmail.trim());
             setResetSent(true);
+            toast.success(`Reset link sent to ${resetEmail}!`);
         } catch (err) {
             if (err.code === 'auth/user-not-found') {
                 setResetError('No account found with this email address.');
+                toast.error('No account found with this email.');
             } else {
                 setResetError('Failed to send reset email. Please try again.');
+                toast.error('Failed to send reset email. Try again.');
             }
         } finally {
             setResetLoading(false);

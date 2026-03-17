@@ -6,15 +6,11 @@ import {
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useToast } from '../context/ToastContext';
 
 const EDUCATION_LEVELS = [
-    'Primary School',
     'Secondary School (O/L)',
     'Advanced Level (A/L)',
-    'Diploma',
-    "Bachelor's Degree",
-    "Master's Degree",
-    'PhD',
     'Other',
 ];
 
@@ -69,6 +65,7 @@ function LoadingSpinner() {
 }
 
 function ApplicationModal({ courseId, courseName, onClose }) {
+    const toast = useToast();
     const [form, setForm] = useState(INITIAL_FORM);
     const [errors, setErrors] = useState({});
     const [submitted, setSubmitted] = useState(false);
@@ -114,13 +111,16 @@ function ApplicationModal({ courseId, courseName, onClose }) {
                 status: 'pending',
                 submittedAt: serverTimestamp(),
             });
-            setSubmitted(true); // only set true on actual success
+            setSubmitted(true);
+            toast.success(`Application for "${courseName}" submitted! We'll be in touch.`);
         } catch (err) {
             console.error('Firestore write failed:', err);
             if (err.code === 'permission-denied') {
                 setSubmitError('Submission blocked by server. Please contact the administrator.');
+                toast.error('Submission blocked. Contact the administrator.');
             } else {
                 setSubmitError('Something went wrong. Please check your connection and try again.');
+                toast.error('Submission failed. Check your connection and try again.');
             }
         } finally {
             setLoading(false);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -10,11 +10,12 @@ import {
     Leaf, TrendingUp, CheckCircle, XCircle, Clock, Users,
     AlertTriangle, Save, ChevronRight, ExternalLink, Search,
     Mail, Phone, GraduationCap, Calendar, MapPin, Eye,
-    Send,
+    Send, ShieldAlert,
 } from 'lucide-react';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { sendStatusEmail } from '../emailService';
+import { useToast } from '../context/ToastContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -223,69 +224,29 @@ function CoursesTab({ courses, loading, onEdit, onDelete }) {
     );
 }
 
+
 // ─── Applications Tab ─────────────────────────────────────────────────────────
 
-// ─── Toast Notification ───────────────────────────────────────────────────────
-
-function Toast({ message, type, onDismiss }) {
-    useEffect(() => {
-        const t = setTimeout(onDismiss, 4000);
-        return () => clearTimeout(t);
-    }, [onDismiss]);
-
-    const colors = {
-        success: 'bg-emerald-600',
-        error: 'bg-rose-600',
-        info: 'bg-blue-600',
-    };
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.95 }}
-            className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 rounded-2xl px-5 py-3.5 text-sm font-medium text-white shadow-2xl ${colors[type] || colors.info}`}
-        >
-            {type === 'success' && <CheckCircle className="h-4 w-4 shrink-0" />}
-            {type === 'error' && <XCircle className="h-4 w-4 shrink-0" />}
-            {type === 'info' && <Send className="h-4 w-4 shrink-0" />}
-            {message}
-            <button onClick={onDismiss} className="ml-1 opacity-70 hover:opacity-100">
-                <X className="h-3.5 w-3.5" />
-            </button>
-        </motion.div>
-    );
-}
-
 function ApplicationsTab({ applications, onUpdateStatus }) {
+    const toast = useToast();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [expanded, setExpanded] = useState(null);
-    const [sendingEmail, setSendingEmail] = useState(null); // appId being emailed
-    const [toast, setToast] = useState(null); // { message, type }
-
-    const showToast = useCallback((message, type = 'success') => {
-        setToast({ message, type });
-    }, []);
-
+    const [sendingEmail, setSendingEmail] = useState(null);
+    const [confirmPending, setConfirmPending] = useState(null); // { app, newStatus }
     async function handleStatusChange(app, newStatus) {
         await onUpdateStatus(app.id, newStatus);
+        toast.info(`Status changed to "${newStatus}" for ${app.name}`);
+        setConfirmPending(null);
 
-        // Send email only for approved or rejected
         if (newStatus === 'approved' || newStatus === 'rejected') {
             setSendingEmail(app.id);
             try {
                 await sendStatusEmail(app, newStatus);
-                showToast(
-                    `Email sent to ${app.email} — application ${newStatus}!`,
-                    'success'
-                );
+                toast.success(`Email sent to ${app.email} — application ${newStatus}!`);
             } catch (err) {
                 console.error('EmailJS send failed:', err);
-                showToast(
-                    `Status updated, but email failed to send. Check EmailJS config.`,
-                    'error'
-                );
+                toast.error(`Status updated, but email failed. Check EmailJS config.`);
             } finally {
                 setSendingEmail(null);
             }
@@ -413,7 +374,9 @@ function ApplicationsTab({ applications, onUpdateStatus }) {
                                                     {['pending', 'approved', 'rejected'].map((s) => (
                                                         <button
                                                             key={s}
-                                                            onClick={() => handleStatusChange(app, s)}
+                                                            onClick={() => {
+                                                                if (app.status !== s) setConfirmPending({ app, newStatus: s });
+                                                            }}
                                                             disabled={app.status === s || sendingEmail === app.id}
                                                             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition disabled:opacity-40 ${s === 'approved'
                                                                 ? 'bg-emerald-600 text-white hover:bg-emerald-500'
@@ -447,12 +410,42 @@ function ApplicationsTab({ applications, onUpdateStatus }) {
                     })}
                 </div>
             )}
+
+            {/* Status change confirmation */}
             <AnimatePresence>
-                {toast && (
-                    <Toast
-                        message={toast.message}
-                        type={toast.type}
-                        onDismiss={() => setToast(null)}
+                {confirmPending && (
+                    <ConfirmDialog
+                        icon={
+                            confirmPending.newStatus === 'approved'
+                                ? <CheckCircle className="h-6 w-6 text-emerald-600" />
+                                : confirmPending.newStatus === 'rejected'
+                                    ? <XCircle className="h-6 w-6 text-rose-600" />
+                                    : <Clock className="h-6 w-6 text-amber-500" />
+                        }
+                        iconBg={
+                            confirmPending.newStatus === 'approved' ? 'bg-emerald-100'
+                                : confirmPending.newStatus === 'rejected' ? 'bg-rose-100'
+                                    : 'bg-amber-100'
+                        }
+                        title={`Mark as ${confirmPending.newStatus}?`}
+                        message={
+                            <>
+                                Change <strong className="text-slate-700">{confirmPending.app.name}</strong>'s
+                                application status to{' '}
+                                <strong className="capitalize text-slate-700">{confirmPending.newStatus}</strong>?
+                                {(confirmPending.newStatus === 'approved' || confirmPending.newStatus === 'rejected') &&
+                                    <span className="block mt-1 text-xs text-slate-400">An email notification will be sent to the applicant.</span>
+                                }
+                            </>
+                        }
+                        confirmLabel={`Yes, mark ${confirmPending.newStatus}`}
+                        confirmClass={
+                            confirmPending.newStatus === 'approved' ? 'bg-emerald-600 hover:bg-emerald-500'
+                                : confirmPending.newStatus === 'rejected' ? 'bg-rose-600 hover:bg-rose-500'
+                                    : 'bg-amber-500 hover:bg-amber-400'
+                        }
+                        onConfirm={() => handleStatusChange(confirmPending.app, confirmPending.newStatus)}
+                        onCancel={() => setConfirmPending(null)}
                     />
                 )}
             </AnimatePresence>
@@ -474,7 +467,7 @@ function InfoRow({ icon, label, value }) {
 
 // ─── Course Form Slide Panel ───────────────────────────────────────────────────
 
-function CourseFormPanel({ course, onClose }) {
+function CourseFormPanel({ course, onClose, onSuccess }) {
     const isEdit = Boolean(course);
     const [form, setForm] = useState(
         isEdit ? { ...course, topics: course.topics?.length ? course.topics : [''] } : { ...BLANK_COURSE }
@@ -529,12 +522,15 @@ function CourseFormPanel({ course, onClose }) {
 
             if (isEdit) {
                 await updateDoc(doc(db, 'courses', course.id), payload);
+                onSuccess?.(`Course "${form.title}" updated successfully!`, 'success');
             } else {
                 await addDoc(collection(db, 'courses'), { ...payload, createdAt: serverTimestamp() });
+                onSuccess?.(`Course "${form.title}" added successfully!`, 'success');
             }
             onClose();
         } catch (err) {
             console.error(err);
+            onSuccess?.('Failed to save course. Please try again.', 'error');
         } finally {
             setSaving(false);
         }
@@ -739,6 +735,49 @@ function DeleteConfirm({ course, onConfirm, onCancel }) {
     );
 }
 
+// ─── Generic Confirmation Dialog ─────────────────────────────────────────────
+
+function ConfirmDialog({ icon, iconBg = 'bg-slate-100', title, message, confirmLabel = 'Confirm', confirmClass = 'bg-emerald-600 hover:bg-emerald-500', onConfirm, onCancel }) {
+    return (
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={onCancel}
+        >
+            <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 12 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+                className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl ${iconBg}`}>
+                    {icon}
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+                <div className="mt-1.5 text-sm text-slate-500">{message}</div>
+                <div className="mt-6 flex gap-3">
+                    <button
+                        onClick={onCancel}
+                        className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className={`flex-1 rounded-xl py-2.5 text-sm font-semibold text-white transition ${confirmClass}`}
+                    >
+                        {confirmLabel}
+                    </button>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+}
+
 // ─── Sidebar Nav Item ─────────────────────────────────────────────────────────
 
 function NavItem({ id, label, icon: Icon, badge, active, onClick }) {
@@ -768,6 +807,7 @@ function NavItem({ id, label, icon: Icon, badge, active, onClick }) {
 function AdminDashboard() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+    const toast = useToast();
 
     const [activeTab, setActiveTab] = useState('overview');
     const [courses, setCourses] = useState([]);
@@ -776,6 +816,7 @@ function AdminDashboard() {
     const [showForm, setShowForm] = useState(false);
     const [editingCourse, setEditingCourse] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
     // ── Real-time Firestore listeners ──────────────────────────────────────────
 
@@ -799,12 +840,22 @@ function AdminDashboard() {
     // ── Actions ────────────────────────────────────────────────────────────────
 
     async function handleLogout() {
-        await logout();
-        navigate('/admin/login');
+        try {
+            await logout();
+            navigate('/admin/login');
+        } catch {
+            toast.error('Logout failed. Please try again.');
+        }
     }
 
     async function handleDeleteCourse(id) {
-        await deleteDoc(doc(db, 'courses', id));
+        const target = deleteTarget;
+        try {
+            await deleteDoc(doc(db, 'courses', id));
+            toast.success(`Course "${target?.title}" deleted.`);
+        } catch {
+            toast.error('Failed to delete course. Please try again.');
+        }
         setDeleteTarget(null);
     }
 
@@ -861,7 +912,7 @@ function AdminDashboard() {
                         <p className="text-xs text-white/40">Administrator</p>
                     </div>
                     <button
-                        onClick={handleLogout}
+                        onClick={() => setShowLogoutConfirm(true)}
                         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white/50 transition hover:bg-white/10 hover:text-white"
                     >
                         <LogOut className="h-4 w-4" />
@@ -925,6 +976,7 @@ function AdminDashboard() {
                     <CourseFormPanel
                         course={editingCourse}
                         onClose={() => { setShowForm(false); setEditingCourse(null); }}
+                        onSuccess={(msg, type) => { toast[type]?.(msg); setShowForm(false); setEditingCourse(null); }}
                     />
                 )}
             </AnimatePresence>
@@ -936,6 +988,22 @@ function AdminDashboard() {
                         course={deleteTarget}
                         onConfirm={() => handleDeleteCourse(deleteTarget.id)}
                         onCancel={() => setDeleteTarget(null)}
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Logout confirmation */}
+            <AnimatePresence>
+                {showLogoutConfirm && (
+                    <ConfirmDialog
+                        icon={<LogOut className="h-6 w-6 text-slate-600" />}
+                        iconBg="bg-slate-100"
+                        title="Sign out?"
+                        message="Are you sure you want to sign out of the admin portal?"
+                        confirmLabel="Yes, sign out"
+                        confirmClass="bg-slate-700 hover:bg-slate-600"
+                        onConfirm={handleLogout}
+                        onCancel={() => setShowLogoutConfirm(false)}
                     />
                 )}
             </AnimatePresence>

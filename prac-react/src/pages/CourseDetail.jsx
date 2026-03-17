@@ -7,7 +7,6 @@ import {
     CheckCircle, AlertCircle, Layers,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { getCourseById } from '../data/courses';
 import ApplicationModal from '../components/ApplicationModal';
 
 const LEVEL_STYLE = {
@@ -35,16 +34,6 @@ function CourseDetail() {
     useEffect(() => {
         setLoading(true);
         setCourse(null);
-
-        // 1️⃣ Check static courses first (numeric IDs)
-        const staticCourse = getCourseById(id);
-        if (staticCourse) {
-            setCourse(staticCourse);
-            setLoading(false);
-            return;
-        }
-
-        // 2️⃣ Otherwise fetch from Firestore (admin-added courses have string IDs)
         getDoc(doc(db, 'courses', id))
             .then((snap) => {
                 if (snap.exists()) {
